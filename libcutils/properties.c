@@ -215,12 +215,11 @@ static int connectToServer(const char* fileName)
 static void init(void)
 {
     assert(gPropFd == -1);
-
     gPropFd = connectToServer(SYSTEM_PROPERTY_PIPE_NAME);
     if (gPropFd < 0) {
-        //ALOGW("not connected to system property server\n");
+        ALOGW("not connected to system property server\n");
     } else {
-        //ALOGV("Connected to system property server\n");
+        ALOGV("Connected to system property server\n");
     }
 }
 

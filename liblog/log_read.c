@@ -30,7 +30,7 @@
 #include <cutils/sockets.h>
 #include <log/log.h>
 #include <log/logger.h>
-
+#include <utils/Compat.h>
 /* branchless on many architectures. */
 #define min(x,y) ((y) ^ (((x) ^ (y)) & -((x) < (y))))
 
@@ -300,7 +300,7 @@ static ssize_t send_log_msg(struct logger *logger,
     while ((ret = TEMP_FAILURE_RETRY(read(sock, cp, len))) > 0) {
         struct pollfd p;
 
-        if (((size_t)ret == len) || (buf_size < PAGE_SIZE)) {
+        if (((size_t)ret == len) || (buf_size < getpagesize())) {
             break;
         }
 

@@ -30,6 +30,9 @@ void android_memset16(uint16_t* dst, uint16_t value, size_t size);
 /* size is given in bytes and must be multiple of 4 */
 void android_memset32(uint32_t* dst, uint32_t value, size_t size);
 
+/* size is given in bytes and must be multiple of pointer size */
+void android_memsetip(uintptr_t* dst, uintptr_t value, size_t size);
+
 #if !HAVE_STRLCPY
 /* Declaration of strlcpy() for platforms that don't already have it. */
 size_t strlcpy(char *dst, const char *src, size_t size);

@@ -36,6 +36,16 @@ void android_memset32(uint32_t* dst, uint32_t value, size_t size)
 }
 #endif
 
+#if !HAVE_MEMSETIP
+void android_memsetip(uintptr_t* dst, uintptr_t value, size_t size)
+{
+    size >>= 2;
+    while (size--) {
+        *dst++ = value;
+    }
+}
+#endif
+
 #if !HAVE_STRLCPY
 /*
  * Copyright (c) 1998 Todd C. Miller <Todd.Miller@courtesan.com>
