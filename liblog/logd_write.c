@@ -107,7 +107,7 @@ static int __write_to_log_initialize()
         close(i);
     }
 
-    i = socket(PF_UNIX, SOCK_DGRAM, 0);
+    i = socket(PF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (i < 0) {
         ret = -errno;
         write_to_log = __write_to_log_null;
@@ -472,4 +472,26 @@ int __android_log_btwrite(int32_t tag, char type, const void *payload,
     vec[2].iov_len = len;
 
     return write_to_log(LOG_ID_EVENTS, vec, 3);
+}
+
+/*
+ * Like __android_log_bwrite, but used for writing strings to the
+ * event log.
+ */
+int __android_log_bswrite(int32_t tag, const char *payload)
+{
+    struct iovec vec[4];
+    char type = EVENT_TYPE_STRING;
+    uint32_t len = strlen(payload);
+
+    vec[0].iov_base = &tag;
+    vec[0].iov_len = sizeof(tag);
+    vec[1].iov_base = &type;
+    vec[1].iov_len = sizeof(type);
+    vec[2].iov_base = &len;
+    vec[2].iov_len = sizeof(len);
+    vec[3].iov_base = (void*)payload;
+    vec[3].iov_len = len;
+
+    return write_to_log(LOG_ID_EVENTS, vec, 4);
 }

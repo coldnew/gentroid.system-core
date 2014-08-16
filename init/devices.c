@@ -134,11 +134,10 @@ void fixup_sys_perms(const char *upath)
     char buf[512];
     struct listnode *node;
     struct perms_ *dp;
-    char *secontext;
 
-        /* upaths omit the "/sys" that paths in this list
-         * contain, so we add 4 when comparing...
-         */
+    /* upaths omit the "/sys" that paths in this list
+     * contain, so we add 4 when comparing...
+     */
     list_for_each(node, &sys_perms) {
         dp = &(node_to_item(node, struct perm_node, plist))->dp;
         if (dp->prefix) {
@@ -153,24 +152,44 @@ void fixup_sys_perms(const char *upath)
         }
 
         if ((strlen(upath) + strlen(dp->attr) + 6) > sizeof(buf))
-            return;
+            break;
 
         sprintf(buf,"/sys%s/%s", upath, dp->attr);
         INFO("fixup %s %d %d 0%o\n", buf, dp->uid, dp->gid, dp->perm);
         chown(buf, dp->uid, dp->gid);
         chmod(buf, dp->perm);
-        if (sehandle) {
-            secontext = NULL;
-            selabel_lookup(sehandle, &secontext, buf, 0);
-            if (secontext) {
-                setfilecon(buf, secontext);
-                freecon(secontext);
-           }
-        }
+    }
+
+    // Now fixup SELinux file labels
+    int len = snprintf(buf, sizeof(buf), "/sys%s", upath);
+    if ((len < 0) || ((size_t) len >= sizeof(buf))) {
+        // Overflow
+        return;
+    }
+    if (access(buf, F_OK) == 0) {
+        INFO("restorecon_recursive: %s\n", buf);
+        restorecon_recursive(buf);
     }
 }
 
-static mode_t get_device_perm(const char *path, unsigned *uid, unsigned *gid)
+static bool perm_path_matches(const char *path, struct perms_ *dp)
+{
+    if (dp->prefix) {
+        if (strncmp(path, dp->name, strlen(dp->name)) == 0)
+            return true;
+    } else if (dp->wildcard) {
+        if (fnmatch(dp->name, path, FNM_PATHNAME) == 0)
+            return true;
+    } else {
+        if (strcmp(path, dp->name) == 0)
+            return true;
+    }
+
+    return false;
+}
+
+static mode_t get_device_perm(const char *path, const char **links,
+                unsigned *uid, unsigned *gid)
 {
     mode_t perm;
     struct listnode *node;
@@ -181,22 +200,30 @@ static mode_t get_device_perm(const char *path, unsigned *uid, unsigned *gid)
      * override ueventd.rc
      */
     list_for_each_reverse(node, &dev_perms) {
+        bool match = false;
+
         perm_node = node_to_item(node, struct perm_node, plist);
         dp = &perm_node->dp;
 
-        if (dp->prefix) {
-            if (strncmp(path, dp->name, strlen(dp->name)))
-                continue;
-        } else if (dp->wildcard) {
-            if (fnmatch(dp->name, path, FNM_PATHNAME) != 0)
-                continue;
+        if (perm_path_matches(path, dp)) {
+            match = true;
         } else {
-            if (strcmp(path, dp->name))
-                continue;
+            if (links) {
+                int i;
+                for (i = 0; links[i]; i++) {
+                    if (perm_path_matches(links[i], dp)) {
+                        match = true;
+                        break;
+                    }
+                }
+            }
         }
-        *uid = dp->uid;
-        *gid = dp->gid;
-        return dp->perm;
+
+        if (match) {
+            *uid = dp->uid;
+            *gid = dp->gid;
+            return dp->perm;
+        }
     }
     /* Default if nothing found. */
     *uid = 0;
@@ -215,7 +242,7 @@ static void make_device(const char *path,
     dev_t dev;
     char *secontext = NULL;
 
-    mode = get_device_perm(path, &uid, &gid) | (block ? S_IFBLK : S_IFCHR);
+    mode = get_device_perm(path, links, &uid, &gid) | (block ? S_IFBLK : S_IFCHR);
 
     if (sehandle) {
         selabel_lookup_best_match(sehandle, &secontext, path, links, mode);

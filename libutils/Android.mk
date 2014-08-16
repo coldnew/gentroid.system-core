@@ -66,23 +66,13 @@ LOCAL_SRC_FILES:= $(commonSources)
 ifeq ($(HOST_OS), linux)
 LOCAL_SRC_FILES += Looper.cpp
 endif
+ifeq ($(HOST_OS),darwin)
+LOCAL_CFLAGS += -Wno-unused-parameter
+endif
 LOCAL_MODULE:= libutils
 LOCAL_STATIC_LIBRARIES := liblog
 LOCAL_CFLAGS += $(host_commonCflags)
 LOCAL_MULTILIB := both
-include $(BUILD_HOST_STATIC_LIBRARY)
-
-
-# For the host, 64-bit
-# =====================================================
-include $(CLEAR_VARS)
-LOCAL_SRC_FILES:= $(commonSources)
-ifeq ($(HOST_OS), linux)
-LOCAL_SRC_FILES += Looper.cpp
-endif
-LOCAL_MODULE:= lib64utils
-LOCAL_STATIC_LIBRARIES := liblog
-LOCAL_CFLAGS += $(host_commonCflags) -m64
 include $(BUILD_HOST_STATIC_LIBRARY)
 
 
@@ -103,7 +93,7 @@ endif
 LOCAL_CFLAGS += -Werror
 
 LOCAL_C_INCLUDES += \
-		bionic/libc/private \
+		bionic/libc \
 		external/zlib
 
 LOCAL_STATIC_LIBRARIES := \

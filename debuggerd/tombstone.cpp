@@ -64,6 +64,7 @@ static bool signal_has_si_addr(int sig) {
     case SIGFPE:
     case SIGILL:
     case SIGSEGV:
+    case SIGTRAP:
       return true;
     default:
       return false;
@@ -210,6 +211,12 @@ static void dump_thread_info(log_t* log, pid_t pid, pid_t tid) {
       }
     }
   }
+  // Blacklist logd, logd.reader, logd.writer, logd.auditd, logd.control ...
+  static const char logd[] = "logd";
+  if (!strncmp(threadname, logd, sizeof(logd) - 1)
+      && (!threadname[sizeof(logd) - 1] || (threadname[sizeof(logd) - 1] == '.'))) {
+    log->should_retrieve_logcat = false;
+  }
 
   char procnamebuf[1024];
   char* procname = NULL;
@@ -329,10 +336,11 @@ static void dump_backtrace_and_stack(Backtrace* backtrace, log_t* log) {
 }
 
 static void dump_map(log_t* log, const backtrace_map_t* map, bool fault_addr) {
-  _LOG(log, logtype::MAPS, "%s%" PRIPTR "-%" PRIPTR " %c%c%c %s\n",
-         (fault_addr? "--->" : "    "), map->start, map->end,
+  _LOG(log, logtype::MAPS, "%s%" PRIPTR "-%" PRIPTR " %c%c%c  %7" PRIdPTR "  %s\n",
+         (fault_addr? "--->" : "    "), map->start, map->end - 1,
          (map->flags & PROT_READ) ? 'r' : '-', (map->flags & PROT_WRITE) ? 'w' : '-',
-         (map->flags & PROT_EXEC) ? 'x' : '-', map->name.c_str());
+         (map->flags & PROT_EXEC) ? 'x' : '-',
+         (map->end - map->start), map->name.c_str());
 }
 
 static void dump_nearby_maps(BacktraceMap* map, log_t* log, pid_t tid) {
@@ -342,28 +350,27 @@ static void dump_nearby_maps(BacktraceMap* map, log_t* log, pid_t tid) {
     _LOG(log, logtype::MAPS, "cannot get siginfo for %d: %s\n", tid, strerror(errno));
     return;
   }
-  if (!signal_has_si_addr(si.si_signo)) {
-    return;
-  }
 
+  bool has_fault_address = signal_has_si_addr(si.si_signo);
   uintptr_t addr = reinterpret_cast<uintptr_t>(si.si_addr);
-  addr &= ~0xfff;     // round to 4K page boundary
-  if (addr == 0) {    // null-pointer deref
-    return;
+
+  _LOG(log, logtype::MAPS, "\nmemory map: %s\n", has_fault_address ? "(fault address prefixed with --->)" : "");
+
+  if (has_fault_address && (addr < map->begin()->start)) {
+    _LOG(log, logtype::MAPS, "--->Fault address falls at %" PRIPTR " before any mapped regions\n", addr);
   }
 
-  _LOG(log, logtype::MAPS, "\nmemory map: (fault address prefixed with --->)\n");
-
-  bool found_map = false;
+  BacktraceMap::const_iterator prev = map->begin();
   for (BacktraceMap::const_iterator it = map->begin(); it != map->end(); ++it) {
-    bool in_map = addr >= (*it).start && addr < (*it).end;
-    dump_map(log, &*it, in_map);
-    if(in_map) {
-      found_map = true;
+    if (addr >= (*prev).end && addr < (*it).start) {
+      _LOG(log, logtype::MAPS, "--->Fault address falls at %" PRIPTR " between mapped regions\n", addr);
     }
+    prev = it;
+    bool in_map = has_fault_address && (addr >= (*it).start) && (addr < (*it).end);
+    dump_map(log, &*it, in_map);
   }
-  if(!found_map) {
-    _LOG(log, logtype::ERROR, "\nFault address was not in any map!");
+  if (has_fault_address && (addr >= (*prev).end)) {
+    _LOG(log, logtype::MAPS, "--->Fault address falls at %" PRIPTR " after any mapped regions\n", addr);
   }
 }
 
@@ -445,6 +452,10 @@ static void dump_log_file(
     log_t* log, pid_t pid, const char* filename, unsigned int tail) {
   bool first = true;
   struct logger_list* logger_list;
+
+  if (!log->should_retrieve_logcat) {
+    return;
+  }
 
   logger_list = android_logger_list_open(
       android_name_to_log_id(filename), O_RDONLY | O_NONBLOCK, tail, pid);

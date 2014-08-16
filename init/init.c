@@ -65,6 +65,7 @@ static int property_triggers_enabled = 0;
 
 #if BOOTCHART
 static int   bootchart_count;
+static long long bootchart_time = 0;
 #endif
 
 static char console[32];
@@ -96,11 +97,24 @@ static const char *ENV[32];
 /* add_environment - add "key=value" to the current environment */
 int add_environment(const char *key, const char *val)
 {
-    int n;
+    size_t n;
+    size_t key_len = strlen(key);
 
-    for (n = 0; n < 31; n++) {
-        if (!ENV[n]) {
-            size_t len = strlen(key) + strlen(val) + 2;
+    /* The last environment entry is reserved to terminate the list */
+    for (n = 0; n < (ARRAY_SIZE(ENV) - 1); n++) {
+
+        /* Delete any existing entry for this key */
+        if (ENV[n] != NULL) {
+            size_t entry_key_len = strcspn(ENV[n], "=");
+            if ((entry_key_len == key_len) && (strncmp(ENV[n], key, entry_key_len) == 0)) {
+                free((char*)ENV[n]);
+                ENV[n] = NULL;
+            }
+        }
+
+        /* Add entry if a free slot is available */
+        if (ENV[n] == NULL) {
+            size_t len = key_len + strlen(val) + 2;
             char *entry = malloc(len);
             snprintf(entry, len, "%s=%s", key, val);
             ENV[n] = entry;
@@ -108,7 +122,9 @@ int add_environment(const char *key, const char *val)
         }
     }
 
-    return 1;
+    ERROR("No env. room to store: '%s':'%s'\n", key, val);
+
+    return -1;
 }
 
 static void zap_stdio(void)
@@ -802,27 +818,21 @@ static int property_service_init_action(int nargs, char **args)
      * that /data/local.prop cannot interfere with them.
      */
     start_property_service();
+    if (get_property_set_fd() < 0) {
+        ERROR("start_property_service() failed\n");
+        exit(1);
+    }
+
     return 0;
 }
 
 static int signal_init_action(int nargs, char **args)
 {
     signal_init();
-    return 0;
-}
-
-static int check_startup_action(int nargs, char **args)
-{
-    /* make sure we actually have all the pieces we need */
-    if ((get_property_set_fd() < 0) ||
-        (get_signal_fd() < 0)) {
-        ERROR("init startup failure\n");
+    if (get_signal_fd() < 0) {
+        ERROR("signal_init() failed\n");
         exit(1);
     }
-
-        /* signal that we hit this point */
-    unlink("/dev/.booting");
-
     return 0;
 }
 
@@ -1083,7 +1093,6 @@ int main(int argc, char **argv)
     queue_builtin_action(mix_hwrng_into_linux_rng_action, "mix_hwrng_into_linux_rng");
     queue_builtin_action(property_service_init_action, "property_service_init");
     queue_builtin_action(signal_init_action, "signal_init");
-    queue_builtin_action(check_startup_action, "check_startup");
 
     /* Don't mount filesystems or start core system services if in charger mode. */
     if (is_charger) {
@@ -1092,7 +1101,7 @@ int main(int argc, char **argv)
         action_for_each_trigger("late-init", action_add_queue_tail);
     }
 
-        /* run all property triggers based on current state of the properties */
+    /* run all property triggers based on current state of the properties */
     queue_builtin_action(queue_property_triggers_action, "queue_property_triggers");
 
 
@@ -1139,11 +1148,29 @@ int main(int argc, char **argv)
 
 #if BOOTCHART
         if (bootchart_count > 0) {
-            if (timeout < 0 || timeout > BOOTCHART_POLLING_MS)
-                timeout = BOOTCHART_POLLING_MS;
-            if (bootchart_step() < 0 || --bootchart_count == 0) {
-                bootchart_finish();
-                bootchart_count = 0;
+            long long current_time;
+            int elapsed_time, remaining_time;
+
+            current_time = bootchart_gettime();
+            elapsed_time = current_time - bootchart_time;
+
+            if (elapsed_time >= BOOTCHART_POLLING_MS) {
+                /* count missed samples */
+                while (elapsed_time >= BOOTCHART_POLLING_MS) {
+                    elapsed_time -= BOOTCHART_POLLING_MS;
+                    bootchart_count--;
+                }
+                /* count may be negative, take a sample anyway */
+                bootchart_time = current_time;
+                if (bootchart_step() < 0 || bootchart_count <= 0) {
+                    bootchart_finish();
+                    bootchart_count = 0;
+                }
+            }
+            if (bootchart_count > 0) {
+                remaining_time = BOOTCHART_POLLING_MS - elapsed_time;
+                if (timeout < 0 || timeout > remaining_time)
+                    timeout = remaining_time;
             }
         }
 #endif
