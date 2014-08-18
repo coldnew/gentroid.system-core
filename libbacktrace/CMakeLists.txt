@@ -2,6 +2,8 @@ project (backtrace)
 find_package (Threads REQUIRED)
 find_package (Unwind REQUIRED)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
+
 string (TOLOWER ${CMAKE_SYSTEM_PROCESSOR} ARCH_SUFFIX)
 
 find_library (UNWIND_LIBRARY unwind PATHS ${UNWIND_LIBRARY_DIRS} NO_DEFAULT_PATH)

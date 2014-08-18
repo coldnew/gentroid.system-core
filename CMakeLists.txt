@@ -3,7 +3,7 @@ project(android-corelibs)
 cmake_minimum_required(VERSION 2.8)
 include(/usr/share/android/cmake/AndroidConfig.cmake)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11")
 
 add_subdirectory(liblog)
 add_subdirectory(libcutils)
